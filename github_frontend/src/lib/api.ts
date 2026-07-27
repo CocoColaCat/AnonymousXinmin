@@ -3,7 +3,7 @@ import { BACKEND_API_URL } from '../config';
 
 export function getApiBaseUrl(): string {
   const custom = localStorage.getItem('XINMIN_API_URL');
-  if (custom && custom.trim() !== '') {
+  if (custom && custom.trim() !== '' && custom.trim() !== '/api') {
     return custom.trim().replace(/\/$/, '');
   }
   return BACKEND_API_URL;
