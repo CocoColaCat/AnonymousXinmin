@@ -5,4 +5,4 @@
  * 例如：
  * export const BACKEND_API_URL = 'https://your-backend-service.onrender.com/api';
  */
-export const BACKEND_API_URL = '/api';
+export const BACKEND_API_URL = import.meta.env.VITE_API_URL || 'https://anonymousxinmin-backed.onrender.com/api';
