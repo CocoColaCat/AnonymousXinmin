@@ -2,7 +2,7 @@ name: Deploy Frontend to GitHub Pages
 
 on:
   push:
-    branches: [ main ] # 或 master
+    branches: [ main ] # 如果您的主要分支叫 master，請改為 master
 
 permissions:
   contents: read
@@ -26,18 +26,18 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22 # 改用 Node 22 消除警告
+          node-version: 22
 
       - name: Install Dependencies
-        # 若程式碼在 github_frontend 子資料夾，請取消下行的註解：
+        # 如果程式碼放在 github_frontend 子資料夾，請取消下一行的註解：
         # working-directory: ./github_frontend
-        run: npm install # 使用 npm install 代替 npm ci
+        run: npm install
 
       - name: Build Project
-        # 若程式碼在 github_frontend 子資料夾，請取消下行的註解：
+        # 如果程式碼放在 github_frontend 子資料夾，請取消下一行的註解：
         # working-directory: ./github_frontend
         env:
-          VITE_API_URL: ${{ secrets.VITE_API_URL }} # 或直接填：https://anonymousxinmin-backed.onrender.com/api
+          VITE_API_URL: "https://anonymousxinmin-backed.onrender.com/api"
           VITE_TURNSTILE_SITE_KEY: "0x4AAAAAAD_Exkr-g2QpaNgb"
           VITE_SUPABASE_URL: "https://yeqvfyxwuyyjlxqtzvbc.supabase.co"
           VITE_SUPABASE_ANON_KEY: "YOUR_SUPABASE_ANON_KEY"
@@ -49,7 +49,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # 若程式碼在子資料夾，請改為 ./github_frontend/dist
+          # 如果程式碼放在 github_frontend 子資料夾，請改為 ./github_frontend/dist
           path: ./dist
 
       - name: Deploy to GitHub Pages
