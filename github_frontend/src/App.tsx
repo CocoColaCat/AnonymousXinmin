@@ -167,7 +167,7 @@ export default function App() {
     } catch (err: any) {
       console.error('Fetch posts failed:', err);
       setErrorMsg(err.message || '無法連線至匿名新民 API 伺服器，請確認後端狀況。');
-    } fontally: () => {
+    } finally {
       setIsLoading(false);
       setIsRefreshing(false);
     }
