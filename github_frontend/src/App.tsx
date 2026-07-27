@@ -73,10 +73,17 @@ export default function App() {
       }
     }
 
-    // Check if URL ends with /admin.html or hash #admin
+    // Check if URL ends with /admin.html or hash #admin or query ?admin
     const path = window.location.pathname;
     const hash = window.location.hash;
-    if (path.endsWith('/admin.html') || path.endsWith('/admin') || hash === '#admin') {
+    const search = window.location.search;
+    if (
+      path.endsWith('/admin.html') ||
+      path.endsWith('/admin') ||
+      hash === '#admin' ||
+      hash.includes('admin') ||
+      search.includes('admin')
+    ) {
       setIsAdminModalOpen(true);
     }
   }, []);
@@ -370,7 +377,7 @@ export default function App() {
       </button>
 
       {/* Footer */}
-      <footer className="mt-12 bg-[#0A0A0A] border-t border-[#222] py-8 px-4 text-center text-xs text-neutral-400 space-y-2 font-mono">
+      <footer className="mt-12 bg-[#0A0A0A] border-t border-[#222] py-8 px-4 text-center text-xs text-neutral-400 space-y-3 font-mono">
         <div className="flex items-center justify-center gap-2 text-[#CBFF00] font-black uppercase tracking-widest text-sm">
           <MessageSquare className="w-4 h-4" />
           <span>匿名新民 (ANONYMOUS XINMIN)</span>
@@ -378,6 +385,29 @@ export default function App() {
         <p className="max-w-md mx-auto text-[11px] text-neutral-500 uppercase tracking-wider">
           暢所欲言 ‧ 匿名表達 ‧ 自由心聲
         </p>
+
+        {/* Discreet Admin & API Config Links */}
+        <div className="pt-2 flex items-center justify-center gap-4 text-[10px] text-neutral-500">
+          <button onClick={() => setIsAdminModalOpen(true)} className="hover:text-[#CBFF00] transition-colors">
+            ⚙️ 管理員後台
+          </button>
+          <span>|</span>
+          <button onClick={() => {
+            const currentUrl = localStorage.getItem('XINMIN_API_URL') || 'https://anonymousxinmin-backed.onrender.com/api';
+            const newUrl = window.prompt('請輸入您的後端 API 網址 (例如 https://yourbackend.onrender.com/api)：', currentUrl);
+            if (newUrl !== null) {
+              if (newUrl.trim() === '') {
+                localStorage.removeItem('XINMIN_API_URL');
+              } else {
+                localStorage.setItem('XINMIN_API_URL', newUrl.trim());
+              }
+              window.location.reload();
+            }
+          }} className="hover:text-[#CBFF00] transition-colors">
+            🌐 更改後端 API
+          </button>
+        </div>
+
         <div className="text-[10px] text-neutral-600 pt-2 border-t border-[#1A1A1A] max-w-xs mx-auto">
           © {new Date().getFullYear()} 匿名新民 ‧ ARTISTIC FLAIR THEME
         </div>
