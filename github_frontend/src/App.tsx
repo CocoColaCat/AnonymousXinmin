@@ -9,6 +9,7 @@ import { CreatePostModal } from './components/CreatePostModal';
 import { NicknameModal } from './components/NicknameModal';
 import { AdminModal } from './components/AdminModal';
 import { SuspensionModal } from './components/SuspensionModal';
+import { RulesConsentModal } from './components/RulesConsentModal';
 import { Plus, MessageSquare, Sparkles, AlertCircle } from 'lucide-react';
 
 export default function App() {
@@ -30,6 +31,12 @@ export default function App() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isSuspensionModalOpen, setIsSuspensionModalOpen] = useState(false);
+  const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{
+    type: 'createPost' | 'createComment';
+    postPayload?: any;
+    commentPayload?: { postId: string; content: string; alias?: string; replyToFloor?: number };
+  } | null>(null);
 
   // Suspension / Ban Management State
   const [banReason, setBanReason] = useState<string>('違反社群規範與發表不當言論');
@@ -182,12 +189,75 @@ export default function App() {
     if (checkIsBanned()) {
       setIsSuspensionModalOpen(true);
       showToast('🛑 權限受限：您已被停權，無法發送貼文');
-      throw new Error('帳號已被停權，無法發送貼文');
+      return;
     }
 
-    const newPost = await api.createPost(payload);
-    showToast('🎉 匿名貼文成功發布！');
-    fetchPosts(true);
+    setPendingAction({ type: 'createPost', postPayload: payload });
+    setIsRulesModalOpen(true);
+  };
+
+  const handleRulesConfirm = async () => {
+    setIsRulesModalOpen(false);
+    if (!pendingAction) return;
+
+    if (pendingAction.type === 'createPost' && pendingAction.postPayload) {
+      try {
+        setIsCreateModalOpen(false);
+        setIsLoading(true);
+        const newPost = await api.createPost(pendingAction.postPayload);
+        showToast('🎉 匿名貼文成功發布！');
+        fetchPosts(true);
+      } catch (err: any) {
+        if (err.isBanError && err.banDetails) {
+          const expires = err.banDetails.expiresAt === 'indefinite' 
+            ? Date.now() + 365 * 24 * 60 * 60 * 1000 
+            : new Date(err.banDetails.expiresAt).getTime();
+          setBanReason(err.banDetails.reason);
+          setUnbanTimestamp(expires);
+          localStorage.setItem('xinmin_ban_state', JSON.stringify({
+            banReason: err.banDetails.reason,
+            unbanTimestamp: expires
+          }));
+          setIsSuspensionModalOpen(true);
+          showToast('🛑 您已被系統停權發言！');
+        } else {
+          showToast(err.message || '貼文發布失敗');
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    } else if (pendingAction.type === 'createComment' && pendingAction.commentPayload) {
+      const { postId, content, alias, replyToFloor } = pendingAction.commentPayload;
+      try {
+        setIsLoading(true);
+        await api.createComment(postId, { content, alias, replyToFloor });
+        showToast('💬 匿名留言成功發送！');
+        
+        const updatedPost = await api.getPostById(postId);
+        setActiveDetailPost(updatedPost);
+        fetchPosts(true);
+      } catch (err: any) {
+        if (err.isBanError && err.banDetails) {
+          const expires = err.banDetails.expiresAt === 'indefinite' 
+            ? Date.now() + 365 * 24 * 60 * 60 * 1000 
+            : new Date(err.banDetails.expiresAt).getTime();
+          setBanReason(err.banDetails.reason);
+          setUnbanTimestamp(expires);
+          localStorage.setItem('xinmin_ban_state', JSON.stringify({
+            banReason: err.banDetails.reason,
+            unbanTimestamp: expires
+          }));
+          setIsSuspensionModalOpen(true);
+          showToast('🛑 您已被系統停權發言！');
+        } else {
+          showToast(err.message || '留言發言失敗');
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    setPendingAction(null);
   };
 
   // Handle Reactions
@@ -243,15 +313,14 @@ export default function App() {
     if (checkIsBanned()) {
       setIsSuspensionModalOpen(true);
       showToast('🛑 權限受限：您已被停權，無法發表留言');
-      throw new Error('帳號已被停權，無法發表留言');
+      return;
     }
 
-    await api.createComment(postId, { content, alias, replyToFloor });
-    showToast('💬 匿名留言成功發送！');
-    
-    const updatedPost = await api.getPostById(postId);
-    setActiveDetailPost(updatedPost);
-    fetchPosts(true);
+    setPendingAction({
+      type: 'createComment',
+      commentPayload: { postId, content, alias, replyToFloor }
+    });
+    setIsRulesModalOpen(true);
   };
 
   // Handle Comment Like
@@ -454,6 +523,15 @@ export default function App() {
         onClose={() => setIsSuspensionModalOpen(false)}
         banReason={banReason}
         unbanTimestamp={unbanTimestamp}
+      />
+
+      <RulesConsentModal
+        isOpen={isRulesModalOpen}
+        onClose={() => {
+          setIsRulesModalOpen(false);
+          setPendingAction(null);
+        }}
+        onConfirm={handleRulesConfirm}
       />
 
     </div>

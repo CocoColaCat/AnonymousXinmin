@@ -55,6 +55,7 @@ export interface Post {
   isPinned?: boolean;
   reportsCount: number;
   isModerated?: boolean;
+  ip?: string;
 }
 
 export type SortType = 'latest' | 'hot' | 'most_commented' | 'pinned';

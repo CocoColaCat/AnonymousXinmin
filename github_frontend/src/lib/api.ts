@@ -30,6 +30,12 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     const response = await fetch(fullUrl, { ...options, headers });
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
+      if (response.status === 403 && errData.error === 'banned') {
+        const err = new Error(errData.message || '您已被停權');
+        (err as any).isBanError = true;
+        (err as any).banDetails = errData;
+        throw err;
+      }
       throw new Error(errData.error || `HTTP ${response.status}: 請求失敗`);
     }
     return await response.json();
@@ -99,6 +105,33 @@ export const api = {
   async reportPost(postId: string) {
     return request<{ message: string; reportsCount: number }>(`/posts/${postId}/report`, {
       method: 'POST',
+    });
+  },
+
+  async adminVerifySecret(secret: string) {
+    return request<{ success: boolean; posts: Post[]; bans: any[] }>('/admin/verify', {
+      method: 'POST',
+      body: JSON.stringify({ secret }),
+    });
+  },
+
+  async adminBan(payload: { ip: string; reason: string; durationMinutes: number | string; deletePostIds?: string[] }, adminSecret: string) {
+    return request<{ success: boolean; message: string; bans: any[]; posts: Post[] }>('/admin/ban', {
+      method: 'POST',
+      headers: {
+        'x-admin-secret': adminSecret,
+      },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async adminUnban(ip: string, adminSecret: string) {
+    return request<{ success: boolean; message: string; bans: any[] }>('/admin/unban', {
+      method: 'POST',
+      headers: {
+        'x-admin-secret': adminSecret,
+      },
+      body: JSON.stringify({ ip }),
     });
   },
 
