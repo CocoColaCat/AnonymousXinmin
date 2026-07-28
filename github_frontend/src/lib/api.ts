@@ -28,7 +28,21 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   try {
     const response = await fetch(fullUrl, { ...options, headers });
+
     if (!response.ok) {
+      // If primary endpoint failed and we used an external URL, attempt local container fallback
+      if (baseUrl !== '/api' && baseUrl !== '') {
+        try {
+          const fallbackUrl = `/api${endpoint}`;
+          const fallbackResp = await fetch(fallbackUrl, { ...options, headers });
+          if (fallbackResp.ok) {
+            return await fallbackResp.json();
+          }
+        } catch (fallbackErr) {
+          // ignore fallback error and throw original error
+        }
+      }
+
       const errData = await response.json().catch(() => ({}));
       if (response.status === 403 && errData.error === 'banned') {
         const err = new Error(errData.message || '您已被停權');
@@ -40,6 +54,17 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     }
     return await response.json();
   } catch (error: any) {
+    if (baseUrl !== '/api' && baseUrl !== '') {
+      try {
+        const fallbackUrl = `/api${endpoint}`;
+        const fallbackResp = await fetch(fallbackUrl, { ...options, headers });
+        if (fallbackResp.ok) {
+          return await fallbackResp.json();
+        }
+      } catch (fallbackErr) {
+        // ignore fallback error
+      }
+    }
     console.error(`API Error on ${fullUrl}:`, error);
     throw error;
   }
