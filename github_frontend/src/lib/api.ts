@@ -1,7 +1,10 @@
 import { Post, CategoryType, SortType, CreatePostPayload, CreateCommentPayload } from '../types';
-import { BACKEND_API_URL } from '../config';
+import { BACKEND_API_URL, RENDER_BACKEND_URL_PRIMARY, RENDER_BACKEND_URL_SECONDARY } from '../config';
+
+let activeWorkingBaseUrl: string | null = null;
 
 export function getApiBaseUrl(): string {
+  if (activeWorkingBaseUrl) return activeWorkingBaseUrl;
   const custom = localStorage.getItem('XINMIN_API_URL');
   if (custom && custom.trim() !== '' && custom.trim() !== '/api') {
     return custom.trim().replace(/\/$/, '');
@@ -12,62 +15,69 @@ export function getApiBaseUrl(): string {
 export function setApiBaseUrl(url: string) {
   if (!url || !url.trim()) {
     localStorage.removeItem('XINMIN_API_URL');
+    activeWorkingBaseUrl = null;
   } else {
-    localStorage.setItem('XINMIN_API_URL', url.trim().replace(/\/$/, ''));
+    const formatted = url.trim().replace(/\/$/, '');
+    localStorage.setItem('XINMIN_API_URL', formatted);
+    activeWorkingBaseUrl = formatted;
   }
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const baseUrl = getApiBaseUrl();
-  const fullUrl = `${baseUrl}${endpoint}`;
+  const primaryBaseUrl = getApiBaseUrl();
+  const candidates = [
+    primaryBaseUrl,
+    RENDER_BACKEND_URL_PRIMARY,
+    RENDER_BACKEND_URL_SECONDARY,
+    '/api'
+  ].filter((url, idx, self) => Boolean(url) && self.indexOf(url) === idx);
 
   const headers = {
     'Content-Type': 'application/json',
     ...(options.headers || {}),
   };
 
-  try {
-    const response = await fetch(fullUrl, { ...options, headers });
+  let lastError: any = null;
 
-    if (!response.ok) {
-      // If primary endpoint failed and we used an external URL, attempt local container fallback
-      if (baseUrl !== '/api' && baseUrl !== '') {
-        try {
-          const fallbackUrl = `/api${endpoint}`;
-          const fallbackResp = await fetch(fallbackUrl, { ...options, headers });
-          if (fallbackResp.ok) {
-            return await fallbackResp.json();
-          }
-        } catch (fallbackErr) {
-          // ignore fallback error and throw original error
-        }
+  for (const baseUrl of candidates) {
+    const fullUrl = `${baseUrl.replace(/\/$/, '')}${endpoint}`;
+    try {
+      const response = await fetch(fullUrl, { ...options, headers });
+
+      if (response.ok) {
+        // Cache working base URL for subsequent requests
+        activeWorkingBaseUrl = baseUrl;
+        return await response.json();
       }
 
       const errData = await response.json().catch(() => ({}));
+
+      // Handle Ban error strictly without fallback loop
       if (response.status === 403 && errData.error === 'banned') {
         const err = new Error(errData.message || '您已被停權');
         (err as any).isBanError = true;
         (err as any).banDetails = errData;
         throw err;
       }
-      throw new Error(errData.error || `HTTP ${response.status}: 請求失敗`);
-    }
-    return await response.json();
-  } catch (error: any) {
-    if (baseUrl !== '/api' && baseUrl !== '') {
-      try {
-        const fallbackUrl = `/api${endpoint}`;
-        const fallbackResp = await fetch(fallbackUrl, { ...options, headers });
-        if (fallbackResp.ok) {
-          return await fallbackResp.json();
-        }
-      } catch (fallbackErr) {
-        // ignore fallback error
+
+      // If 404, 502, or 503 (e.g. static host without /api or Render cold start), try next candidate URL
+      if (response.status === 404 || response.status === 502 || response.status === 503) {
+        lastError = new Error(errData.error || `HTTP ${response.status}: 請求失敗`);
+        continue;
       }
+
+      // Other 4xx / 5xx errors (e.g. 400 Bad Request, 401 Unauthorized), throw immediately
+      throw new Error(errData.error || `HTTP ${response.status}: 請求失敗`);
+    } catch (error: any) {
+      if (error.isBanError) throw error;
+      lastError = error;
+      // Network failure or timeout -> try next candidate URL
+      continue;
     }
-    console.error(`API Error on ${fullUrl}:`, error);
-    throw error;
   }
+
+  console.error(`API Error on ${endpoint}:`, lastError);
+  throw lastError || new Error('所有後端伺服器連接失敗');
 }
 
 export const api = {
