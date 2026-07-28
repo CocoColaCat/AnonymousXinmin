@@ -60,16 +60,33 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
         throw err;
       }
 
-      // If 404, 502, or 503 (e.g. static host without /api or Render cold start), try next candidate URL
-      if (response.status === 404 || response.status === 502 || response.status === 503) {
+      // Explicit business logic errors from real backend (e.g. wrong admin password, validation error)
+      if (errData && errData.error && (response.status === 403 || response.status === 400 || response.status === 401)) {
+        throw new Error(errData.error);
+      }
+
+      // If 404, 405 (static host POST disallowed), 502, 503, 504 (Render cold start), try next candidate URL
+      if (
+        response.status === 404 ||
+        response.status === 405 ||
+        response.status === 502 ||
+        response.status === 503 ||
+        response.status === 504
+      ) {
+        if (activeWorkingBaseUrl === baseUrl) {
+          activeWorkingBaseUrl = null;
+        }
         lastError = new Error(errData.error || `HTTP ${response.status}: 請求失敗`);
         continue;
       }
 
-      // Other 4xx / 5xx errors (e.g. 400 Bad Request, 401 Unauthorized), throw immediately
+      // Other unexpected errors
       throw new Error(errData.error || `HTTP ${response.status}: 請求失敗`);
     } catch (error: any) {
       if (error.isBanError) throw error;
+      if (error.message && (error.message.includes('密碼錯誤') || error.message.includes('權限'))) {
+        throw error;
+      }
       lastError = error;
       // Network failure or timeout -> try next candidate URL
       continue;
