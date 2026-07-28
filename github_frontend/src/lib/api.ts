@@ -3,6 +3,7 @@ import { BACKEND_API_URL, RENDER_BACKEND_URL_PRIMARY, RENDER_BACKEND_URL_SECONDA
 
 let activeWorkingBaseUrl: string | null = null;
 
+// Default API Base URL (relative /api or custom BACKEND_API_URL from config.ts)
 export function getApiBaseUrl(): string {
   if (activeWorkingBaseUrl) return activeWorkingBaseUrl;
   const custom = localStorage.getItem('XINMIN_API_URL');
@@ -60,6 +61,14 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
         throw err;
       }
 
+      // Handle VPN / Proxy detection error strictly without fallback loop
+      if ((response.status === 403 || response.status === 400) && errData.error === 'vpn_detected') {
+        const err = new Error(errData.message || '你的網路觸發了安全防護請重開網路或者是關閉VPN或Proxy');
+        (err as any).isVpnError = true;
+        (err as any).vpnDetails = errData;
+        throw err;
+      }
+
       // Explicit business logic errors from real backend (e.g. wrong admin password, validation error)
       if (errData && errData.error && (response.status === 403 || response.status === 400 || response.status === 401)) {
         throw new Error(errData.error);
@@ -83,7 +92,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       // Other unexpected errors
       throw new Error(errData.error || `HTTP ${response.status}: 請求失敗`);
     } catch (error: any) {
-      if (error.isBanError) throw error;
+      if (error.isBanError || error.isVpnError) throw error;
       if (error.message && (error.message.includes('密碼錯誤') || error.message.includes('權限'))) {
         throw error;
       }
@@ -96,6 +105,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   console.error(`API Error on ${endpoint}:`, lastError);
   throw lastError || new Error('所有後端伺服器連接失敗');
 }
+
 
 export const api = {
   async getHealth() {
@@ -116,6 +126,15 @@ export const api = {
     return request<Post[]>(`/posts${queryStr}`);
   },
 
+  async getUserInteractions(): Promise<{
+    ip: string;
+    reactions: Record<string, string>;
+    commentLikes: string[];
+    pollVotes: Record<string, string>;
+  }> {
+    return request('/user-interactions');
+  },
+
   async getPostById(id: string): Promise<Post> {
     return request<Post>(`/posts/${id}`);
   },
@@ -127,8 +146,8 @@ export const api = {
     });
   },
 
-  async reactToPost(id: string, reactionType: 'like' | 'heart' | 'laugh' | 'sad' | 'angry'): Promise<{ id: string; reactions: Post['reactions'] }> {
-    return request<{ id: string; reactions: Post['reactions'] }>(`/posts/${id}/react`, {
+  async reactToPost(id: string, reactionType: 'like' | 'heart' | 'laugh' | 'sad' | 'angry'): Promise<{ id: string; reactions: Post['reactions']; myReaction: string | null }> {
+    return request<{ id: string; reactions: Post['reactions']; myReaction: string | null }>(`/posts/${id}/react`, {
       method: 'POST',
       body: JSON.stringify({ reactionType }),
     });
@@ -141,14 +160,14 @@ export const api = {
     });
   },
 
-  async likeComment(postId: string, commentId: string) {
-    return request(`/posts/${postId}/comments/${commentId}/like`, {
+  async likeComment(postId: string, commentId: string): Promise<{ comment: any; liked: boolean }> {
+    return request<{ comment: any; liked: boolean }>(`/posts/${postId}/comments/${commentId}/like`, {
       method: 'POST',
     });
   },
 
-  async votePoll(postId: string, optionId: string) {
-    return request(`/posts/${postId}/vote`, {
+  async votePoll(postId: string, optionId: string): Promise<{ poll: any; myVote: string }> {
+    return request<{ poll: any; myVote: string }>(`/posts/${postId}/vote`, {
       method: 'POST',
       body: JSON.stringify({ optionId }),
     });

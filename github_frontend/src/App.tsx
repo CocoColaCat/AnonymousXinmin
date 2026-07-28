@@ -9,6 +9,7 @@ import { CreatePostModal } from './components/CreatePostModal';
 import { NicknameModal } from './components/NicknameModal';
 import { AdminModal } from './components/AdminModal';
 import { SuspensionModal } from './components/SuspensionModal';
+import { AntiVpnModal } from './components/AntiVpnModal';
 import { RulesConsentModal } from './components/RulesConsentModal';
 import { Plus, MessageSquare, Sparkles, AlertCircle } from 'lucide-react';
 
@@ -23,6 +24,29 @@ export default function App() {
 
   // User Nickname State
   const [userNickname, setUserNickname] = useState<string>('');
+
+  // User Interactions (IP-based)
+  const [userInteractions, setUserInteractions] = useState<{
+    reactions: Record<string, string>;
+    commentLikes: string[];
+    pollVotes: Record<string, string>;
+  }>({ reactions: {}, commentLikes: [], pollVotes: {} });
+
+  // Fetch IP interactions
+  const fetchUserInteractions = useCallback(async () => {
+    try {
+      const data = await api.getUserInteractions();
+      if (data) {
+        setUserInteractions({
+          reactions: data.reactions || {},
+          commentLikes: data.commentLikes || [],
+          pollVotes: data.pollVotes || {}
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to load user interactions:', e);
+    }
+  }, []);
   const [isNicknameModalOpen, setIsNicknameModalOpen] = useState(false);
   const [isInitialNicknameSetup, setIsInitialNicknameSetup] = useState(false);
 
@@ -42,6 +66,34 @@ export default function App() {
   const [banReason, setBanReason] = useState<string>('違反社群規範與發表不當言論');
   const [banMinutes, setBanMinutes] = useState<number>(15);
   const [unbanTimestamp, setUnbanTimestamp] = useState<number>(0);
+
+  // Anti-VPN Security Modal State
+  const [isAntiVpnModalOpen, setIsAntiVpnModalOpen] = useState<boolean>(false);
+  const [antiVpnMessage, setAntiVpnMessage] = useState<string>('你的網路觸發了安全防護請重開網路或者是關閉VPN或Proxy');
+
+  const handleVpnOrBanError = (err: any): boolean => {
+    if (err.isVpnError || err.message?.includes('vpn_detected') || err.message?.includes('觸發了安全防護') || err.message?.includes('關閉VPN或Proxy')) {
+      const msg = err.vpnDetails?.message || err.message || '你的網路觸發了安全防護請重開網路或者是關閉VPN或Proxy';
+      setAntiVpnMessage(msg);
+      setIsAntiVpnModalOpen(true);
+      return true;
+    }
+    if (err.isBanError && err.banDetails) {
+      const expires = err.banDetails.expiresAt === 'indefinite' 
+        ? Date.now() + 365 * 24 * 60 * 60 * 1000 
+        : new Date(err.banDetails.expiresAt).getTime();
+      setBanReason(err.banDetails.reason);
+      setUnbanTimestamp(expires);
+      localStorage.setItem('xinmin_ban_state', JSON.stringify({
+        banReason: err.banDetails.reason,
+        unbanTimestamp: expires
+      }));
+      setIsSuspensionModalOpen(true);
+      showToast('🛑 您已被系統停權發言！');
+      return true;
+    }
+    return false;
+  };
 
   // Toast message
   const [toast, setToast] = useState<string | null>(null);
@@ -162,14 +214,17 @@ export default function App() {
     showToast(`✨ 已設定預設暱稱：「${newNickname}」`);
   };
 
-  // Fetch posts from API
+  // Fetch posts and interactions from API
   const fetchPosts = useCallback(async (isSilent = false) => {
     try {
       if (!isSilent) setIsLoading(true);
       setIsRefreshing(true);
       setErrorMsg('');
 
-      const data = await api.getPosts(selectedCategory, selectedSort, searchQuery);
+      const [data] = await Promise.all([
+        api.getPosts(selectedCategory, selectedSort, searchQuery),
+        fetchUserInteractions()
+      ]);
       setPosts(data);
     } catch (err: any) {
       console.error('Fetch posts failed:', err);
@@ -178,7 +233,7 @@ export default function App() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [selectedCategory, selectedSort, searchQuery]);
+  }, [selectedCategory, selectedSort, searchQuery, fetchUserInteractions]);
 
   useEffect(() => {
     fetchPosts();
@@ -208,19 +263,7 @@ export default function App() {
         showToast('🎉 匿名貼文成功發布！');
         fetchPosts(true);
       } catch (err: any) {
-        if (err.isBanError && err.banDetails) {
-          const expires = err.banDetails.expiresAt === 'indefinite' 
-            ? Date.now() + 365 * 24 * 60 * 60 * 1000 
-            : new Date(err.banDetails.expiresAt).getTime();
-          setBanReason(err.banDetails.reason);
-          setUnbanTimestamp(expires);
-          localStorage.setItem('xinmin_ban_state', JSON.stringify({
-            banReason: err.banDetails.reason,
-            unbanTimestamp: expires
-          }));
-          setIsSuspensionModalOpen(true);
-          showToast('🛑 您已被系統停權發言！');
-        } else {
+        if (!handleVpnOrBanError(err)) {
           showToast(err.message || '貼文發布失敗');
         }
       } finally {
@@ -237,19 +280,7 @@ export default function App() {
         setActiveDetailPost(updatedPost);
         fetchPosts(true);
       } catch (err: any) {
-        if (err.isBanError && err.banDetails) {
-          const expires = err.banDetails.expiresAt === 'indefinite' 
-            ? Date.now() + 365 * 24 * 60 * 60 * 1000 
-            : new Date(err.banDetails.expiresAt).getTime();
-          setBanReason(err.banDetails.reason);
-          setUnbanTimestamp(expires);
-          localStorage.setItem('xinmin_ban_state', JSON.stringify({
-            banReason: err.banDetails.reason,
-            unbanTimestamp: expires
-          }));
-          setIsSuspensionModalOpen(true);
-          showToast('🛑 您已被系統停權發言！');
-        } else {
+        if (!handleVpnOrBanError(err)) {
           showToast(err.message || '留言發言失敗');
         }
       } finally {
@@ -260,41 +291,80 @@ export default function App() {
     setPendingAction(null);
   };
 
+  // Pending interaction sets to prevent spamming
+  const [pendingReacts, setPendingReacts] = useState<Set<string>>(new Set());
+  const [pendingVotes, setPendingVotes] = useState<Set<string>>(new Set());
+  const [pendingCommentLikes, setPendingCommentLikes] = useState<Set<string>>(new Set());
+
   // Handle Reactions
   const handleReact = async (postId: string, reactionType: 'like' | 'heart' | 'laugh' | 'sad' | 'angry') => {
-    setPosts(prev => prev.map(p => {
-      if (p.id === postId) {
-        const reactions = { ...p.reactions };
-        reactions[reactionType] = (reactions[reactionType] || 0) + 1;
-        return { ...p, reactions };
-      }
-      return p;
-    }));
-
-    if (activeDetailPost && activeDetailPost.id === postId) {
-      setActiveDetailPost(prev => {
-        if (!prev) return null;
-        const reactions = { ...prev.reactions };
-        reactions[reactionType] = (reactions[reactionType] || 0) + 1;
-        return { ...prev, reactions };
-      });
-    }
+    if (pendingReacts.has(postId)) return;
+    setPendingReacts(prev => new Set(prev).add(postId));
 
     try {
-      await api.reactToPost(postId, reactionType);
-    } catch (err) {
+      const res = await api.reactToPost(postId, reactionType);
+      
+      setUserInteractions(prev => {
+        const newReactions = { ...prev.reactions };
+        if (res.myReaction) {
+          newReactions[postId] = res.myReaction;
+        } else {
+          delete newReactions[postId];
+        }
+        return { ...prev, reactions: newReactions };
+      });
+
+      setPosts(prev => prev.map(p => {
+        if (p.id === postId) {
+          return { ...p, reactions: res.reactions };
+        }
+        return p;
+      }));
+
+      if (activeDetailPost && activeDetailPost.id === postId) {
+        setActiveDetailPost(prev => prev ? { ...prev, reactions: res.reactions } : null);
+      }
+    } catch (err: any) {
       console.error('React failed:', err);
+      if (!handleVpnOrBanError(err)) {
+        showToast(err.message || '心情反應失敗');
+      }
+    } finally {
+      setPendingReacts(prev => {
+        const next = new Set(prev);
+        next.delete(postId);
+        return next;
+      });
     }
   };
 
   // Handle Poll Vote
   const handleVote = async (postId: string, optionId: string) => {
+    if (userInteractions.pollVotes[postId]) {
+      showToast('⚠️ 您已經參與過此投票，無法重複投票！');
+      return;
+    }
+    if (pendingVotes.has(postId)) return;
+    setPendingVotes(prev => new Set(prev).add(postId));
+
     try {
-      await api.votePoll(postId, optionId);
+      const res = await api.votePoll(postId, optionId);
+      setUserInteractions(prev => ({
+        ...prev,
+        pollVotes: { ...prev.pollVotes, [postId]: res.myVote }
+      }));
       showToast('✅ 投票成功！');
       fetchPosts(true);
-    } catch (err) {
-      console.error('Vote failed:', err);
+    } catch (err: any) {
+      if (!handleVpnOrBanError(err)) {
+        showToast(err.message || '投票失敗');
+      }
+    } finally {
+      setPendingVotes(prev => {
+        const next = new Set(prev);
+        next.delete(postId);
+        return next;
+      });
     }
   };
 
@@ -325,10 +395,34 @@ export default function App() {
 
   // Handle Comment Like
   const handleLikeComment = async (postId: string, commentId: string) => {
-    await api.likeComment(postId, commentId);
-    
-    const updatedPost = await api.getPostById(postId);
-    setActiveDetailPost(updatedPost);
+    if (pendingCommentLikes.has(commentId)) return;
+    setPendingCommentLikes(prev => new Set(prev).add(commentId));
+
+    try {
+      const res = await api.likeComment(postId, commentId);
+      setUserInteractions(prev => {
+        let newLikes = [...prev.commentLikes];
+        if (res.liked) {
+          if (!newLikes.includes(commentId)) newLikes.push(commentId);
+        } else {
+          newLikes = newLikes.filter(id => id !== commentId);
+        }
+        return { ...prev, commentLikes: newLikes };
+      });
+
+      const updatedPost = await api.getPostById(postId);
+      setActiveDetailPost(updatedPost);
+    } catch (err: any) {
+      if (!handleVpnOrBanError(err)) {
+        showToast(err.message || '留言點讚失敗');
+      }
+    } finally {
+      setPendingCommentLikes(prev => {
+        const next = new Set(prev);
+        next.delete(commentId);
+        return next;
+      });
+    }
   };
 
   // Handle Admin Post Delete
@@ -429,6 +523,8 @@ export default function App() {
                 onReact={handleReact}
                 onVote={handleVote}
                 onReport={handleReport}
+                myReaction={userInteractions.reactions[post.id]}
+                myVoteOptionId={userInteractions.pollVotes[post.id]}
               />
             ))}
           </div>
@@ -455,25 +551,10 @@ export default function App() {
           暢所欲言 ‧ 匿名表達 ‧ 自由心聲
         </p>
 
-        {/* Discreet Admin & API Config Links */}
+        {/* Discreet Admin Link */}
         <div className="pt-2 flex items-center justify-center gap-4 text-[10px] text-neutral-500">
           <button onClick={() => setIsAdminModalOpen(true)} className="hover:text-[#CBFF00] transition-colors">
             ⚙️ 管理員後台
-          </button>
-          <span>|</span>
-          <button onClick={() => {
-            const currentUrl = localStorage.getItem('XINMIN_API_URL') || 'https://anonymousxinmin-backed.onrender.com/api';
-            const newUrl = window.prompt('請輸入您的後端 API 網址 (例如 https://yourbackend.onrender.com/api)：', currentUrl);
-            if (newUrl !== null) {
-              if (newUrl.trim() === '') {
-                localStorage.removeItem('XINMIN_API_URL');
-              } else {
-                localStorage.setItem('XINMIN_API_URL', newUrl.trim());
-              }
-              window.location.reload();
-            }
-          }} className="hover:text-[#CBFF00] transition-colors">
-            🌐 更改後端 API
           </button>
         </div>
 
@@ -496,6 +577,7 @@ export default function App() {
         onClose={() => setActiveDetailPost(null)}
         onAddComment={handleAddComment}
         onLikeComment={handleLikeComment}
+        likedCommentIds={userInteractions.commentLikes}
       />
 
       <CreatePostModal
@@ -523,6 +605,12 @@ export default function App() {
         onClose={() => setIsSuspensionModalOpen(false)}
         banReason={banReason}
         unbanTimestamp={unbanTimestamp}
+      />
+
+      <AntiVpnModal
+        isOpen={isAntiVpnModalOpen}
+        onClose={() => setIsAntiVpnModalOpen(false)}
+        message={antiVpnMessage}
       />
 
       <RulesConsentModal
